@@ -13,10 +13,16 @@
 #pragma GCC diagnostic ignored "-Wfloat-conversion"
 #include <Arduino.h>
 #include <Keyboard.h>
+
 #include <usb_rawhid.h>
 #include <usb_joystick.h>
+
 #include <USBHost_t36.h>
+
 #include <LiquidCrystal_I2C.h>
+
+#define ENABLE_LOG4ARDUINO
+#include <log4arduino.h>
 #pragma GCC diagnostic pop
 
 #include <array>
@@ -37,11 +43,6 @@ USBHIDParser hid_extra(host);
 
 // Bound all of the keys
 bool bound;
-
-template <typename... Ts>
-constexpr void print(const char* view, Ts... args) {
-    Serial.printf(F(view), std::forward<Ts>(args)...);
-}
 
 void OnPress(int);
 void OnRawPress(uint8_t);
@@ -105,23 +106,30 @@ std::array<std::pair<uint8_t, uint8_t>, 14> defaults = {
 };
 #undef MP
 
-// LiquidCrystal_I2C lcd(0x27, 16, 2);
+template <typename T, typename... Ts>
+void print(T str, Ts... args) {
+    // Avoid issues with C++ varadic macros requiring more than 1 argument
+    if (sizeof...(args) > 0) {
+        LOG(str, args...);
+    } else {
+        FLOGS(str);
+    }
+}
 
 void setup() {
     host.begin();
+    Serial.begin(9600);
+    log4arduino_init(&Serial);
 
-    Serial.println("Attaching...");
+    print("Attaching...");
 
     kb.attachPress(OnPress);
     kb.attachRawPress(OnRawPress);
     kb.attachRawRelease(OnRawRelease);
 
-    Serial.println("Attached");
-    Serial.println();
+    print("Attached\n");
 
-    Serial.print("Select the button to bind to ");
-    Serial.print(keys[max_key]);
-    Serial.print("!\n");
+    print("Select the button to bind to %s!", keys[max_key]);
 }
 
 void loop() {
@@ -131,17 +139,14 @@ void loop() {
 void Bind(uint8_t keycode) {
 
     auto bind_key = [&](auto kb_key, auto joy_key) {
-        // Serial.printf and snprintf are just non-functional for the most part for some reason
-        // So, unfortunately, we are stuck with this.
-        Serial.print("Binding ");
-        Serial.print(kb_key);
-        Serial.print(" (");
-        Serial.print(kb_key, HEX);
-        Serial.print(") to ");
-        Serial.print(joy_key, HEX);
-        Serial.print(" = ");
-        Serial.print(keys.size() > static_cast<size_t>(joy_key - 1) ? keys[static_cast<size_t>(joy_key - 1)] : "unknown");
-        Serial.print("!\n");
+        print("Binding %d (%x) to %x = %s!",
+            kb_key,
+            kb_key,
+            joy_key,
+            keys.size() > static_cast<size_t>(joy_key - 1)
+                ? keys[static_cast<size_t>(joy_key - 1)]
+                : "unknown"
+        );
 
         keymap[kb_key] = bind { joy_key };
     };
@@ -151,28 +156,26 @@ void Bind(uint8_t keycode) {
         bound = true;
 
         if (max_key == 1) {
-            Serial.println("No bindings set, setting to defaults!");
+            print("No bindings set, setting to defaults!");
 
             for (auto& pair : defaults) {
                 bind_key(std::get<0>(pair), std::get<1>(pair));
             }
         }
 
-        Serial.println("ESC clicked! Finished binding!");
+        print("ESC clicked! Finished binding!");
         return;
     }
 
     // We cap at 32 buttons
     if (max_key >= 32) {
         bound = true;
-        Serial.println("Out of keys, finishing binding!");
+        print("Out of keys, finishing binding!");
         return;
     }
 
     if (keymap[keycode].has_value()) {
-        Serial.print("Already have key; ");
-        Serial.print(keycode, HEX);
-        Serial.print("!\n");
+        print("Already have key: %x!", keycode);
         return;
     }
 
@@ -180,9 +183,7 @@ void Bind(uint8_t keycode) {
     ++max_key;
 
     if (keys.size() > static_cast<size_t>(max_key - 1)) {
-        Serial.print("Select the button to bind to ");
-        Serial.print(keys[static_cast<size_t>(max_key - 1)]);
-        Serial.print("!\n");
+        print("Select the button to bind to %s!", keys[static_cast<size_t>(max_key - 1)]);
     }
 }
 
@@ -193,15 +194,11 @@ void OnRawPress(uint8_t keycode) {
     }
 
     keymap[keycode].map([&](auto key) {
-        Serial.print("Pressing joystick button");
-        Serial.print(keys[static_cast<size_t>(key - 1)]);
-        Serial.println("!");
+        print("Pressing joystick button %s!", keys[static_cast<size_t>(key - 1)]);
         Joystick.button(key, true);
     });
 
-    Serial.print("OnRawPress keycode: ");
-    Serial.print(keycode, HEX);
-    Serial.print("\n");
+    print("OnRawPress keycode: %x", keycode);
 }
 void OnRawRelease(uint8_t keycode) {
     if (!bound) {
@@ -212,22 +209,14 @@ void OnRawRelease(uint8_t keycode) {
         Joystick.button(key, false);
     });
 
-    Serial.print("OnRawRelease keycode: ");
-    Serial.print(keycode, HEX);
-    Serial.print("\n");
+    print("OnRawRelease keycode: %x", keycode);
 }
 
 void OnPress(int key)
 {
-    Serial.print("key");
-
     if (isAscii((char) key)) {
-        Serial.print(" '");
-        Serial.print((char)key);
-        Serial.print("'");
-    } 
-
-    Serial.print(": ");
-    Serial.print(key);
-    Serial.print("\n");
+        print("key '%c': %d", static_cast<char>(key), key);
+    } else {
+        print("key: %d", key);
+    }
 }
