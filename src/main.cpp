@@ -20,9 +20,6 @@
 #include <USBHost_t36.h>
 
 #include <LiquidCrystal_I2C.h>
-
-#define ENABLE_LOG4ARDUINO
-#include <log4arduino.h>
 #pragma GCC diagnostic pop
 
 #include <array>
@@ -106,30 +103,32 @@ std::array<std::pair<uint8_t, uint8_t>, 14> defaults = {
 };
 #undef MP
 
-template <typename T, typename... Ts>
-void print(T str, Ts... args) {
-    // Avoid issues with C++ varadic macros requiring more than 1 argument
-    if (sizeof...(args) > 0) {
-        LOG(str, args...);
-    } else {
-        FLOGS(str);
-    }
+template <typename... Ts>
+[[gnu::format(printf, 1, 2)]]
+constexpr void print(const char* str, ...) {
+    std::array<char, 1024> buf {};
+    va_list vl {};
+
+    va_start(vl, str);
+    vsnprintf(buf.data(), buf.size(), str, vl);
+    va_end(vl);
+
+    Serial.write(buf.data());
 }
 
 void setup() {
     host.begin();
     Serial.begin(9600);
-    log4arduino_init(&Serial);
 
-    print("Attaching...");
+    print("Attaching...\n");
 
     kb.attachPress(OnPress);
     kb.attachRawPress(OnRawPress);
     kb.attachRawRelease(OnRawRelease);
 
-    print("Attached\n");
+    print("Attached\n\n");
 
-    print("Select the button to bind to %s!", keys[max_key]);
+    print("Select the button to bind to %s!\n", keys[max_key]);
 }
 
 void loop() {
@@ -139,7 +138,7 @@ void loop() {
 void Bind(uint8_t keycode) {
 
     auto bind_key = [&](auto kb_key, auto joy_key) {
-        print("Binding %d (%x) to %x = %s!",
+        print("Binding %d (%x) to %x = %s!\n",
             kb_key,
             kb_key,
             joy_key,
@@ -156,26 +155,26 @@ void Bind(uint8_t keycode) {
         bound = true;
 
         if (max_key == 1) {
-            print("No bindings set, setting to defaults!");
+            print("No bindings set, setting to defaults!\n");
 
             for (auto& pair : defaults) {
                 bind_key(std::get<0>(pair), std::get<1>(pair));
             }
         }
 
-        print("ESC clicked! Finished binding!");
+        print("ESC clicked! Finished binding!\n");
         return;
     }
 
     // We cap at 32 buttons
     if (max_key >= 32) {
         bound = true;
-        print("Out of keys, finishing binding!");
+        print("Out of keys, finishing binding!\n");
         return;
     }
 
     if (keymap[keycode].has_value()) {
-        print("Already have key: %x!", keycode);
+        print("Already have key: %x!\n", keycode);
         return;
     }
 
@@ -183,7 +182,7 @@ void Bind(uint8_t keycode) {
     ++max_key;
 
     if (keys.size() > static_cast<size_t>(max_key - 1)) {
-        print("Select the button to bind to %s!", keys[static_cast<size_t>(max_key - 1)]);
+        print("Select the button to bind to %s!\n", keys[static_cast<size_t>(max_key - 1)]);
     }
 }
 
@@ -194,11 +193,11 @@ void OnRawPress(uint8_t keycode) {
     }
 
     keymap[keycode].map([&](auto key) {
-        print("Pressing joystick button %s!", keys[static_cast<size_t>(key - 1)]);
+        print("Pressing joystick button %s!\n", keys[static_cast<size_t>(key - 1)]);
         Joystick.button(key, true);
     });
 
-    print("OnRawPress keycode: %x", keycode);
+    print("OnRawPress keycode: %x\n", keycode);
 }
 void OnRawRelease(uint8_t keycode) {
     if (!bound) {
@@ -209,14 +208,14 @@ void OnRawRelease(uint8_t keycode) {
         Joystick.button(key, false);
     });
 
-    print("OnRawRelease keycode: %x", keycode);
+    print("OnRawRelease keycode: %x\n", keycode);
 }
 
 void OnPress(int key)
 {
     if (isAscii((char) key)) {
-        print("key '%c': %d", static_cast<char>(key), key);
+        print("key '%c': %d\n", static_cast<char>(key), key);
     } else {
-        print("key: %d", key);
+        print("key: %d\n", key);
     }
 }
