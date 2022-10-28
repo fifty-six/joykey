@@ -19,11 +19,19 @@
 
 #include <USBHost_t36.h>
 
-#include <LiquidCrystal_I2C.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 #pragma GCC diagnostic pop
 
 #include <array>
 #include <algorithm>
+
+constexpr bool print_keycodes = 
+#ifdef DEBUG
+    true;
+#else
+    false;
+#endif
 
 // We need an USBHIDParser for the USBHost in order for KeyboardController to be
 // able to read our input, I believe if we have multiple it'll better handle
@@ -67,6 +75,8 @@ public:
 uint8_t max_key = 1;
 std::array<bind, 256> keymap;
 
+uint32_t active_keys;
+
 std::array<const char*, 14> keys = {
     "D-Pad Up",
     "D-Pad Right",
@@ -103,22 +113,127 @@ std::array<std::pair<uint8_t, uint8_t>, 14> defaults = {
 };
 #undef MP
 
+Adafruit_SSD1306 display(128, 32, &Wire, -1, 1000000);
+
+enum class DisplayStatus {
+    Clear,
+    Hold
+};
+
+
+void print(DisplayStatus clear, const char* str, va_list vl) {
+    std::array<char, 1024> buf {};
+
+    vsnprintf(buf.data(), buf.size(), str, vl);
+
+    if (clear == DisplayStatus::Clear) {
+        display.clearDisplay();
+        display.setCursor(0, 0);
+    }
+    display.setTextColor(1);
+    display.setTextSize(1);
+    display.print(buf.data());
+    display.display();
+
+    Serial.write(buf.data());
+}
+
 template <typename... Ts>
 [[gnu::format(printf, 1, 2)]]
-constexpr void print(const char* str, ...) {
-    std::array<char, 1024> buf {};
+void print(const char* str, ...) {
     va_list vl {};
 
     va_start(vl, str);
-    vsnprintf(buf.data(), buf.size(), str, vl);
+    print(DisplayStatus::Clear, str, vl);
     va_end(vl);
+}
 
-    Serial.write(buf.data());
+template <typename... Ts>
+[[gnu::format(printf, 2, 3)]]
+void print(DisplayStatus ds, const char* str, ...) {
+    va_list vl {};
+
+    va_start(vl, str);
+    print(ds, str, vl);
+    va_end(vl);
+}
+
+template <typename T>
+struct Vec2 {
+    T x;
+    T y;
+
+    Vec2(T x_, T y_) : x{x_}, y{y_} {};
+};
+
+// NohBoard style representation of the controller
+//
+//   ||   [B ] [Y  ] [A ] [X ]
+// |||||| [LT] [LTB] [RB] [LB]
+//   ||
+//   
+void show_controller() {
+    display.clearDisplay();
+    display.setTextColor(1);
+    display.setTextSize(1);
+
+    // Try to center this a bit given we have 128x32
+    // Each is 8 big, so we this is 24 wide so start at 1 + 4
+    // instead of 1 in theory, but beneath the display is a black
+    // bar, so instead offset a *little* more underneath that.
+    const std::array<Vec2<int16_t>, 4> dpad_coords {
+        // Up
+        Vec2<int16_t> { 9,  6 + 1  },
+        // Right
+        Vec2<int16_t> { 17, 6 + 9  },
+        // Down
+        Vec2<int16_t> { 9,  6 + 17 },
+        // Left
+        Vec2<int16_t> { 1,  6 + 9  },
+    };
+
+    auto key_pressed = [&](size_t key) {
+        return (active_keys & (1u << key)) == (1u << key);
+    };
+
+    // D-Pad
+    for (size_t i = 1; i < 5; i++) {
+        auto v = dpad_coords[i - 1];
+        if (key_pressed(i)) {
+            display.fillRect(v.x, v.y, 8, 8, 1);
+        } else {
+            display.drawRect(v.x, v.y, 8, 8, 1);
+        }
+    }
+
+    // Top row
+    for (size_t i = 11; i <= 14; i++) {
+        if (key_pressed(i)) {
+            display.fillCircle(static_cast<int16_t>(40 + 15 * (i - 11)), 10, 6, int16_t { 1 });
+        } else {
+            display.drawCircle(static_cast<int16_t>(40 + 15 * (i - 11)), 10, 6, int16_t { 1 });
+        }
+    }
+
+    // Bottom row
+    for (size_t i = 7; i <= 10; i++) {
+        if (key_pressed(i)) {
+            display.fillCircle(static_cast<int16_t>(40 + 15 * (i - 7)), 24, 6, int16_t { 1 });
+        } else {
+            display.drawCircle(static_cast<int16_t>(40 + 15 * (i - 7)), 24, 6, int16_t { 1 });
+        }
+    }
+
+    display.display();
 }
 
 void setup() {
     host.begin();
     Serial.begin(9600);
+
+    display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+    display.clearDisplay();
+    display.display();
 
     print("Attaching...\n");
 
@@ -128,7 +243,7 @@ void setup() {
 
     print("Attached\n\n");
 
-    print("Select the button to bind to %s!\n", keys[max_key]);
+    print("Select the button to bind to %s!\nClick ESC for default binds.", keys[static_cast<size_t>(max_key - 1)]);
 }
 
 void loop() {
@@ -136,7 +251,6 @@ void loop() {
 }
 
 void Bind(uint8_t keycode) {
-
     auto bind_key = [&](auto kb_key, auto joy_key) {
         print("Binding %d (%x) to %x = %s!\n",
             kb_key,
@@ -169,7 +283,7 @@ void Bind(uint8_t keycode) {
     // We cap at 32 buttons
     if (max_key >= 32) {
         bound = true;
-        print("Out of keys, finishing binding!\n");
+        print(DisplayStatus::Hold, "Out of keys, finishing binding!\n");
         return;
     }
 
@@ -182,7 +296,7 @@ void Bind(uint8_t keycode) {
     ++max_key;
 
     if (keys.size() > static_cast<size_t>(max_key - 1)) {
-        print("Select the button to bind to %s!\n", keys[static_cast<size_t>(max_key - 1)]);
+        print(DisplayStatus::Hold, "Select the button to bind to %s!\n", keys[static_cast<size_t>(max_key - 1)]);
     }
 }
 
@@ -193,11 +307,18 @@ void OnRawPress(uint8_t keycode) {
     }
 
     keymap[keycode].map([&](auto key) {
-        print("Pressing joystick button %s!\n", keys[static_cast<size_t>(key - 1)]);
         Joystick.button(key, true);
+
+        active_keys |= 1u << key;
+
+        if (!print_keycodes) {
+            show_controller();
+        }
     });
 
-    print("OnRawPress keycode: %x\n", keycode);
+    if (print_keycodes) {
+        print("OnRawPress keycode: %x\n", keycode);
+    }
 }
 void OnRawRelease(uint8_t keycode) {
     if (!bound) {
@@ -206,13 +327,24 @@ void OnRawRelease(uint8_t keycode) {
 
     keymap[keycode].map([&](auto key) {
         Joystick.button(key, false);
+
+        active_keys &= ~(1u << key);
+
+        if (!print_keycodes) {
+            show_controller();
+        }
     });
 
-    print("OnRawRelease keycode: %x\n", keycode);
+    if (print_keycodes) {
+        print("OnRawRelease keycode: %x\n", keycode);
+    }
 }
 
 void OnPress(int key)
 {
+    if (!print_keycodes)
+        return;
+
     if (isAscii((char) key)) {
         print("key '%c': %d\n", static_cast<char>(key), key);
     } else {
