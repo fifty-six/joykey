@@ -1,0 +1,3 @@
+[submodule "lib/ArduinoXInput_Teensy"]
+	path = lib/ArduinoXInput_Teensy
+	url = git@github.com:dmadison/ArduinoXInput_Teensy.git

@@ -16,11 +16,14 @@
 
 #include <usb_rawhid.h>
 #include <usb_joystick.h>
+#include <usb_xinput.h>
 
 #include <USBHost_t36.h>
 
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+
+#include <XInput.h>
 #pragma GCC diagnostic pop
 
 #include <array>
@@ -72,46 +75,53 @@ public:
     constexpr bind(uint8_t v) : key_{v} {};
 };
 
-uint8_t max_key = 1;
+uint8_t max_key = 0;
 std::array<bind, 256> keymap;
 
 uint32_t active_keys;
 
-std::array<const char*, 14> keys = {
-    "D-Pad Up",
-    "D-Pad Right",
-    "D-Pad Down",
-    "D-Pad Left",
-    "Window",
-    "Menu",
-    "LT",
-    "LT + LB",
-    "RB",
-    "LB",
-    "B",
-    "Y",
-    "A",
-    "X"
+std::array<const char*, 17> keys = {
+    "B_LOGO = 0",
+    "B_A = 1",
+    "B_B = 2",
+    "B_X = 3",
+    "B_Y = 4",
+    "B_LB = 5",
+    "B_RB = 6",
+    "B_BACK = 7",
+    "B_START = 8",
+    "B_L3 = 9",
+    "B_R3 = 10",
+    "DPAD_UP = 11",
+    "DPAD_DOWN = 12",
+    "DPAD_LEFT = 13",
+    "DPAD_RIGHT = 14",
+    "TRIGGER_LEFT = 15",
+    "TRIGGER_RIGHT = 16"
 };
 
-#define P std::make_pair
-std::array<std::pair<uint8_t, uint8_t>, 14> defaults = {
-    P(0x2C, 1),     // Space  -> D-Pad Up
-    P(0x07, 2),     // D      -> D-Pad Right
-    P(0x16, 3),     // S      -> D-Pad Down
-    P(0x04, 4),     // A      -> D-Pad Left
-    P(0x34, 5),     // '      -> Window
-    P(0x28, 6),     // Enter  -> Menu
-    P(0x0B, 7),     // H      -> LT
-    P(0x0D, 8),     // J      -> LT + LB
-    P(0x0E, 9),     // K      -> RB
-    P(0x14, 0xA),   // L      -> LB
-    P(0x1C, 0xB),   // Y      -> B
-    P(0x18, 0xC),   // U      -> Y
-    P(0x0C, 0xD),   // I      -> A
-    P(0x12, 0xE)    // O      -> X
-};
-#undef MP
+/*
+ * Q         Y U I O
+ * A S D     H J K L
+ * 
+ *         [  Space  ]
+ */
+std::array<std::pair<uint8_t, XInputControl>, 14> defaults = {{
+    { 0x2C, XInputControl::DPAD_UP      }, // Space  -> D-Pad Up
+    { 0x07, XInputControl::DPAD_RIGHT   }, // D      -> D-Pad Right
+    { 0x16, XInputControl::DPAD_DOWN    }, // S      -> D-Pad Down
+    { 0x04, XInputControl::DPAD_LEFT    }, // A      -> D-Pad Left
+    { 0x34, XInputControl::BUTTON_BACK  }, // '      -> Window
+    { 0x28, XInputControl::BUTTON_START }, // Enter  -> Menu
+    { 0x0B, XInputControl::TRIGGER_LEFT }, // H      -> LT
+    { 0x0D, XInputControl::JOY_LEFT     }, // J      -> LT + LB
+    { 0x0E, XInputControl::BUTTON_RB    }, // K      -> RB
+    { 0x14, XInputControl::BUTTON_LB    }, // L      -> LB
+    { 0x1C, XInputControl::BUTTON_B     }, // Y      -> B
+    { 0x18, XInputControl::BUTTON_Y     }, // U      -> Y
+    { 0x0C, XInputControl::BUTTON_A     }, // I      -> A
+    { 0x12, XInputControl::BUTTON_X     }  // O      -> X
+}};
 
 Adafruit_SSD1306 display(128, 32, &Wire, -1, 1000000);
 
@@ -119,7 +129,6 @@ enum class DisplayStatus {
     Clear,
     Hold
 };
-
 
 void print(DisplayStatus clear, const char* str, va_list vl) {
     std::array<char, 1024> buf {};
@@ -166,10 +175,23 @@ struct Vec2 {
     Vec2(T x_, T y_) : x{x_}, y{y_} {};
 };
 
+template <typename T, typename F>
+void enumerate(std::initializer_list<T> l, F&& f) {
+    int index = 0;
+    for (auto value : l) {
+        f(index++, value);
+    }
+}
+
+template <typename T>
+auto to_underlying(T v) -> std::underlying_type_t<T> {
+    return static_cast<std::underlying_type_t<T>>(v);
+}
+
 // NohBoard style representation of the controller
 //
-//   ||   [B ] [Y  ] [A ] [X ]
-// |||||| [LT] [LTB] [RB] [LB]
+//   ||   [A ] [B ] [Y ] [X ]
+// |||||| [LB] [RB] [LT] [RT]
 //   ||
 //   
 void show_controller() {
@@ -184,45 +206,48 @@ void show_controller() {
     const std::array<Vec2<int16_t>, 4> dpad_coords {
         // Up
         Vec2<int16_t> { 9,  6 + 1  },
-        // Right
-        Vec2<int16_t> { 17, 6 + 9  },
         // Down
         Vec2<int16_t> { 9,  6 + 17 },
         // Left
         Vec2<int16_t> { 1,  6 + 9  },
+        // Right
+        Vec2<int16_t> { 17, 6 + 9  },
     };
 
     auto key_pressed = [&](size_t key) {
         return (active_keys & (1u << key)) == (1u << key);
     };
 
-    // D-Pad
-    for (size_t i = 1; i < 5; i++) {
-        auto v = dpad_coords[i - 1];
-        if (key_pressed(i)) {
-            display.fillRect(v.x, v.y, 8, 8, 1);
-        } else {
-            display.drawRect(v.x, v.y, 8, 8, 1);
-        }
-    }
+    /* using enum XInputControl */ 
 
-    // Top row
-    for (size_t i = 11; i <= 14; i++) {
-        if (key_pressed(i)) {
-            display.fillCircle(static_cast<int16_t>(40 + 15 * (i - 11)), 10, 6, int16_t { 1 });
+    /*
+     * These rely on the enums being contiguous unless
+     * otherwise stated, which is just convenient. 
+     */
+    enumerate({ XInputControl::DPAD_UP, XInputControl::DPAD_DOWN, XInputControl::DPAD_LEFT, XInputControl::DPAD_RIGHT }, [&](int i, auto v) {
+        auto vec = dpad_coords[static_cast<size_t>(i)];
+        if (key_pressed(to_underlying(v))) {
+            display.fillRect(vec.x, vec.y, 8, 8, 1);
         } else {
-            display.drawCircle(static_cast<int16_t>(40 + 15 * (i - 11)), 10, 6, int16_t { 1 });
+            display.drawRect(vec.x, vec.y, 8, 8, 1);
         }
-    }
+    });
 
-    // Bottom row
-    for (size_t i = 7; i <= 10; i++) {
-        if (key_pressed(i)) {
-            display.fillCircle(static_cast<int16_t>(40 + 15 * (i - 7)), 24, 6, int16_t { 1 });
+    enumerate({ XInputControl::BUTTON_A, XInputControl::BUTTON_B, XInputControl::BUTTON_Y, XInputControl::BUTTON_X }, [&](int i, auto v) {
+        if (key_pressed(to_underlying(v))) {
+            display.fillCircle(static_cast<int16_t>(40 + 15 * i), 10, 6, int16_t { 1 });
         } else {
-            display.drawCircle(static_cast<int16_t>(40 + 15 * (i - 7)), 24, 6, int16_t { 1 });
+            display.drawCircle(static_cast<int16_t>(40 + 15 * i), 10, 6, int16_t { 1 });
         }
-    }
+    });
+
+    enumerate({ XInputControl::BUTTON_LB, XInputControl::BUTTON_RB, XInputControl::TRIGGER_LEFT, XInputControl::TRIGGER_RIGHT }, [&](int i, auto v) {
+        if (key_pressed(to_underlying(v))) {
+            display.fillCircle(static_cast<int16_t>(40 + 15 * i), 24, 6, int16_t { 1 });
+        } else {
+            display.drawCircle(static_cast<int16_t>(40 + 15 * i), 24, 6, int16_t { 1 });
+        }
+    });
 
     display.display();
 }
@@ -241,9 +266,11 @@ void setup() {
     kb.attachRawPress(OnRawPress);
     kb.attachRawRelease(OnRawRelease);
 
+    XInput.begin();
+
     print("Attached\n\n");
 
-    print("Select the button to bind to %s!\nClick ESC for default binds.", keys[static_cast<size_t>(max_key - 1)]);
+    print("Select the button to bind to %s!\nClick ESC for default binds.", keys[max_key]);
 }
 
 void loop() {
@@ -268,7 +295,7 @@ void Bind(uint8_t keycode) {
     if (keycode == 0x29) {
         bound = true;
 
-        if (max_key == 1) {
+        if (max_key == 0) {
             print("No bindings set, setting to defaults!\n");
 
             for (auto& pair : defaults) {
@@ -280,8 +307,8 @@ void Bind(uint8_t keycode) {
         return;
     }
 
-    // We cap at 32 buttons
-    if (max_key >= 32) {
+    // We cap at 17 buttons
+    if (max_key >= 16) {
         bound = true;
         print(DisplayStatus::Hold, "Out of keys, finishing binding!\n");
         return;
@@ -295,8 +322,8 @@ void Bind(uint8_t keycode) {
     bind_key(keycode, max_key);
     ++max_key;
 
-    if (keys.size() > static_cast<size_t>(max_key - 1)) {
-        print(DisplayStatus::Hold, "Select the button to bind to %s!\n", keys[static_cast<size_t>(max_key - 1)]);
+    if (keys.size() > static_cast<size_t>(max_key)) {
+        print(DisplayStatus::Hold, "Select the button to bind to %s!\n", keys[max_key]);
     }
 }
 
@@ -307,7 +334,7 @@ void OnRawPress(uint8_t keycode) {
     }
 
     keymap[keycode].map([&](auto key) {
-        Joystick.button(key, true);
+        XInput.press(key);
 
         active_keys |= 1u << key;
 
@@ -326,7 +353,7 @@ void OnRawRelease(uint8_t keycode) {
     }
 
     keymap[keycode].map([&](auto key) {
-        Joystick.button(key, false);
+        XInput.release(key);
 
         active_keys &= ~(1u << key);
 
