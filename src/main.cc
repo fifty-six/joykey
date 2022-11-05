@@ -162,17 +162,37 @@ void show_controller() {
         Vec2<int16_t> { 17, 6 + 9  },
     };
 
+    const auto dpad = {
+        XInputControl::DPAD_UP,
+        XInputControl::DPAD_DOWN,
+        XInputControl::DPAD_LEFT,
+        XInputControl::DPAD_RIGHT 
+    };
+
+    const auto top_row = {
+        XInputControl::BUTTON_A,
+        XInputControl::BUTTON_B,
+        XInputControl::BUTTON_Y,
+        XInputControl::BUTTON_X 
+    };
+
+    const auto bot_row = {
+        XInputControl::BUTTON_LB,
+        XInputControl::BUTTON_RB,
+        XInputControl::TRIGGER_LEFT,
+        XInputControl::TRIGGER_RIGHT 
+    };
+
+
     auto key_pressed = [&](size_t key) {
         return (active_keys & (1u << key)) == (1u << key);
     };
-
-    /* using enum XInputControl */ 
 
     /*
      * These rely on the enums being contiguous unless
      * otherwise stated, which is just convenient. 
      */
-    enumerate({ XInputControl::DPAD_UP, XInputControl::DPAD_DOWN, XInputControl::DPAD_LEFT, XInputControl::DPAD_RIGHT }, [&](int i, auto v) {
+    enumerate(dpad, [&](int i, auto v) {
         auto vec = dpad_coords[static_cast<size_t>(i)];
         if (key_pressed(to_underlying(v))) {
             display.fillRect(vec.x, vec.y, 8, 8, 1);
@@ -181,7 +201,7 @@ void show_controller() {
         }
     });
 
-    enumerate({ XInputControl::BUTTON_A, XInputControl::BUTTON_B, XInputControl::BUTTON_Y, XInputControl::BUTTON_X }, [&](int i, auto v) {
+    enumerate(top_row, [&](int i, auto v) {
         if (key_pressed(to_underlying(v))) {
             display.fillCircle(static_cast<int16_t>(40 + 15 * i), 10, 6, int16_t { 1 });
         } else {
@@ -189,7 +209,7 @@ void show_controller() {
         }
     });
 
-    enumerate({ XInputControl::BUTTON_LB, XInputControl::BUTTON_RB, XInputControl::TRIGGER_LEFT, XInputControl::TRIGGER_RIGHT }, [&](int i, auto v) {
+    enumerate(bot_row, [&](int i, auto v) {
         if (key_pressed(to_underlying(v))) {
             display.fillCircle(static_cast<int16_t>(40 + 15 * i), 24, 6, int16_t { 1 });
         } else {
