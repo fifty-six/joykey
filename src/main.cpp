@@ -52,9 +52,9 @@ USBHIDParser hid_extra(host);
 // Bound all of the keys
 bool bound;
 
-void OnPress(int);
-void OnRawPress(uint8_t);
-void OnRawRelease(uint8_t);
+void on_press(int);
+void on_raw_press(uint8_t);
+void on_raw_release(uint8_t);
 
 class bind {
     uint8_t key_ = 255;
@@ -262,9 +262,9 @@ void setup() {
 
     print("Attaching...\n");
 
-    kb.attachPress(OnPress);
-    kb.attachRawPress(OnRawPress);
-    kb.attachRawRelease(OnRawRelease);
+    kb.attachPress(on_press);
+    kb.attachRawPress(on_raw_press);
+    kb.attachRawRelease(on_raw_release);
 
     XInput.begin();
 
@@ -277,7 +277,7 @@ void loop() {
     host.Task();
 }
 
-void Bind(uint8_t keycode) {
+void bind_key(uint8_t keycode) {
     auto bind_key = [&](auto kb_key, auto joy_key) {
         print("Binding %d (%x) to %x = %s!\n",
             kb_key,
@@ -327,9 +327,9 @@ void Bind(uint8_t keycode) {
     }
 }
 
-void OnRawPress(uint8_t keycode) {
+void on_raw_press(uint8_t keycode) {
     if (!bound) {
-        Bind(keycode);
+        bind_key(keycode);
         return;
     }
 
@@ -344,10 +344,10 @@ void OnRawPress(uint8_t keycode) {
     });
 
     if (print_keycodes) {
-        print("OnRawPress keycode: %x\n", keycode);
+        print("on_raw_press keycode: %x\n", keycode);
     }
 }
-void OnRawRelease(uint8_t keycode) {
+void on_raw_release(uint8_t keycode) {
     if (!bound) {
         return;
     }
@@ -363,11 +363,11 @@ void OnRawRelease(uint8_t keycode) {
     });
 
     if (print_keycodes) {
-        print("OnRawRelease keycode: %x\n", keycode);
+        print("on_raw_release keycode: %x\n", keycode);
     }
 }
 
-void OnPress(int key)
+void on_press(int key)
 {
     if (!print_keycodes)
         return;
