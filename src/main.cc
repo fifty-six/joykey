@@ -278,6 +278,7 @@ void bind_key(uint8_t keycode) {
     // We cap at 17 buttons
     if (max_key >= 16) {
         bound = true;
+
         print(DisplayStatus::Hold, "Out of keys, finishing binding!\n");
         return;
     }
@@ -337,8 +338,9 @@ void on_raw_release(uint8_t keycode) {
 
 void on_press(int key)
 {
-    if (!print_keycodes)
+    if (!print_keycodes) {
         return;
+    }
 
     if (isAscii((char) key)) {
         print("key '%c': %d\n", static_cast<char>(key), key);
