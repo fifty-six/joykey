@@ -36,5 +36,5 @@ def main():
     
     env.Execute(create_flag)
 
-if __name__ == "__main__":
-    main()
+# Can't check __name__ == "__main__" because then platformio doesn't run it.
+main()
