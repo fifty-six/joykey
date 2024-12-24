@@ -1,4 +1,5 @@
 #include <main.h>
+#include <usb_nsgamepad.h>
 
 constexpr bool print_keycodes = 
 #ifdef DEBUG
@@ -6,6 +7,8 @@ constexpr bool print_keycodes =
 #else
     false;
 #endif
+
+#define DPAD true
 
 // We need an USBHIDParser for the USBHost in order for KeyboardController to be
 // able to read our input, I believe if we have multiple it'll better handle
@@ -27,6 +30,8 @@ uint8_t max_key = 0;
 std::array<bind, 256> keymap;
 
 uint32_t active_keys;
+
+uint8_t dpad_bits = 0;
 
 std::array<const char*, 17> keys = {
     "B_LOGO = 0",
@@ -69,6 +74,48 @@ std::array<std::pair<uint8_t, XInputControl>, 14> defaults = {{
     { 0x18, XInputControl::BUTTON_Y     }, // U      -> Y
     { 0x0C, XInputControl::BUTTON_A     }, // I      -> A
     { 0x12, XInputControl::BUTTON_X     }  // O      -> X
+}};
+
+// std::array<std::pair<uint8_t, uint16_t>, 14> defaults_ns = {{
+//     //
+//     { 0x1A, 0xff00 + (1 << 0) }, // W      -> D-Pad Up
+//     { 0x16, 0xff00 + (1 << 2) }, // S      -> D-Pad Down
+//     //
+//     { 0x04, 0xff00 + (1 << 3) }, // A      -> D-Pad Left
+//     { 0x07, 0xff00 + (1 << 1) }, // D      -> D-Pad Right
+//     //
+//     { 0x34, NSButton_Minus }, // '      -> Window
+//     { 0x28, NSButton_Plus }, // Enter  -> Menu
+//     { 0x0B, NSButton_LeftTrigger }, // H      -> LT
+//     { 0x0D, NSButton_RightTrigger }, // J      -> LT + LB
+//     { 0x0E, NSButton_LeftThrottle }, // K      -> RB
+//     { 0x14, NSButton_RightThrottle }, // L      -> LB
+//     { 0x1C, NSButton_B }, // Y      -> B
+//     { 0x2C, NSButton_Y }, // U      -> Y
+//     { 0x0C, NSButton_A }, // I      -> A
+//     { 0x12, NSButton_X }  // O      -> X
+// }};
+
+std::array<std::pair<uint8_t, uint16_t>, 8> defaults_ns = {{
+    //
+    { 0x2c, 0xff00 + (1 << 0) }, // Space -> Up
+    { 0x51, 0xff00 + (1 << 2) }, // Down
+    //
+    { 0x50, 0xff00 + (1 << 3) }, // Left
+    { 0x4f, 0xff00 + (1 << 1) }, // Right
+    //
+    { 0x1d, NSButton_Y }, // Z -> B
+    { 0x1b, NSButton_X }, // X -> A
+    { 0x06, NSButton_B }, // C -> RB
+    { 0x19, NSButton_A }
+    // leaving the rest here for the sake of it
+    // { 0x0D, NSButton_RightTrigger }, // J      -> LT + LB
+    // { 0x0E, NSButton_LeftThrottle }, // K      -> RB
+    // { 0x14, NSButton_RightThrottle }, // L      -> LB
+    // { 0x1C, NSButton_B }, // Y      -> B
+    // { 0x2C, NSButton_Y }, // U      -> Y
+    // { 0x0C, NSButton_A }, // I      -> A
+    // { 0x12, NSButton_X }  // O      -> X
 }};
 
 Adafruit_SSD1306 display(128, 32, &Wire, -1, 1000000);
@@ -154,53 +201,49 @@ void show_controller() {
     const std::array<Vec2<int16_t>, 4> dpad_coords {
         // Up
         Vec2<int16_t> { 9,  6 + 1  },
+        // Right
+        Vec2<int16_t> { 17, 6 + 9  },
         // Down
         Vec2<int16_t> { 9,  6 + 17 },
         // Left
         Vec2<int16_t> { 1,  6 + 9  },
-        // Right
-        Vec2<int16_t> { 17, 6 + 9  },
-    };
-
-    const auto dpad = {
-        XInputControl::DPAD_UP,
-        XInputControl::DPAD_DOWN,
-        XInputControl::DPAD_LEFT,
-        XInputControl::DPAD_RIGHT 
     };
 
     const auto top_row = {
-        XInputControl::BUTTON_A,
-        XInputControl::BUTTON_B,
-        XInputControl::BUTTON_Y,
-        XInputControl::BUTTON_X 
+        NSButton_Y,
+        NSButton_B,
+        NSButton_A,
+        NSButton_X,
     };
 
     const auto bot_row = {
-        XInputControl::BUTTON_LB,
-        XInputControl::BUTTON_RB,
-        XInputControl::TRIGGER_LEFT,
-        XInputControl::TRIGGER_RIGHT 
+        NSButton_LeftThrottle,
+        NSButton_RightThrottle,
+        NSButton_LeftTrigger,
+        NSButton_RightTrigger
     };
-
 
     auto key_pressed = [&](size_t key) {
         return (active_keys & (1u << key)) == (1u << key);
+    };
+
+    auto dpad_pressed = [&](size_t key) {
+        return (dpad_bits & (1u << key)) == (1u << key);
     };
 
     /*
      * These rely on the enums being contiguous unless
      * otherwise stated, which is just convenient. 
      */
-    enumerate(dpad, [&](int i, auto v) {
-        auto vec = dpad_coords[static_cast<size_t>(i)];
-        if (key_pressed(to_underlying(v))) {
+    for (size_t i = 0; i < 4; i++) {
+        auto vec = dpad_coords[i];
+
+        if (dpad_pressed(i)) {
             display.fillRect(vec.x, vec.y, 8, 8, 1);
         } else {
             display.drawRect(vec.x, vec.y, 8, 8, 1);
         }
-    });
-
+    }
     enumerate(top_row, [&](int i, auto v) {
         if (key_pressed(to_underlying(v))) {
             display.fillCircle(static_cast<int16_t>(40 + 15 * i), 10, 6, int16_t { 1 });
@@ -234,7 +277,7 @@ void setup() {
     kb.attachRawPress(on_raw_press);
     kb.attachRawRelease(on_raw_release);
 
-    XInput.begin();
+    NSGamepad.begin();
 
     print("Attached\n\n");
 
@@ -243,6 +286,38 @@ void setup() {
 
 void loop() {
     host.Task();
+
+#if DPAD
+    const std::array<uint8_t, 16> dpad_map = {
+        NSGAMEPAD_DPAD_CENTERED,  // 0000 All dpad buttons up
+        NSGAMEPAD_DPAD_UP,        // 0001 direction UP
+        NSGAMEPAD_DPAD_RIGHT,     // 0010 direction RIGHT
+        NSGAMEPAD_DPAD_UP_RIGHT,  // 0011 direction UP RIGHT
+        NSGAMEPAD_DPAD_DOWN,      // 0100 direction DOWN
+        NSGAMEPAD_DPAD_CENTERED,  // 0101 DOWN + UP => NONE
+        NSGAMEPAD_DPAD_DOWN_RIGHT,// 0110 direction DOWN RIGHT
+        NSGAMEPAD_DPAD_RIGHT,     // 0111 DOWN + RIGHT + UP => RIGHT
+        NSGAMEPAD_DPAD_LEFT,      // 1000 direction LEFT
+        NSGAMEPAD_DPAD_UP_LEFT,   // 1001 direction UP LEFT
+        NSGAMEPAD_DPAD_CENTERED,  // 1010 LEFT + RIGHT => NONE
+        NSGAMEPAD_DPAD_UP,        // 1011 LEFT + RIGHT + UP => UP
+        NSGAMEPAD_DPAD_DOWN_LEFT, // 1100 direction DOWN LEFT
+        NSGAMEPAD_DPAD_LEFT,      // 1101 DOWN + LEFT + UP => LEFT
+        NSGAMEPAD_DPAD_DOWN,      // 1110 LEFT + RIGHT + DOWN => DOWN
+        NSGAMEPAD_DPAD_CENTERED,  // 1111 ALL => NONE
+    };
+
+    NSGamepad.dPad(static_cast<int8_t>(dpad_map[dpad_bits]));
+#else
+    auto pressed = [&](uint8_t v) {
+        return (dpad_bits & (1 << v)) == (1 << v);
+    };
+
+    NSGamepad.leftYAxis(static_cast<uint8_t>(127 * (1 + -1 * pressed(0) + pressed(2))));
+    NSGamepad.leftXAxis(static_cast<uint8_t>(127 * (1 + -1 * pressed(3) + pressed(1))));
+#endif
+
+    NSGamepad.loop();
 }
 
 void bind_key(uint8_t keycode) {
@@ -266,7 +341,10 @@ void bind_key(uint8_t keycode) {
         if (max_key == 0) {
             print("No bindings set, setting to defaults!\n");
 
-            for (auto& pair : defaults) {
+            // for (auto& pair : defaults) {
+            //     bind_key(std::get<0>(pair), std::get<1>(pair));
+            // }
+            for (auto& pair : defaults_ns) {
                 bind_key(std::get<0>(pair), std::get<1>(pair));
             }
         }
@@ -303,13 +381,19 @@ void on_raw_press(uint8_t keycode) {
     }
 
     keymap[keycode].map([&](auto key) {
-        XInput.press(key);
 
-        active_keys |= 1u << key;
+        if ((key & 0xff00) == 0) {
+            NSGamepad.press(static_cast<uint8_t>(key));
+            active_keys |= 1u << key;
+        } else {
+            dpad_bits |= (key & ~0xff00);
+        }
+        // XInput.press(key);
 
         if (!print_keycodes) {
             show_controller();
         }
+        // print("hit key %x\n", key);
     });
 
     if (print_keycodes) {
@@ -322,13 +406,19 @@ void on_raw_release(uint8_t keycode) {
     }
 
     keymap[keycode].map([&](auto key) {
-        XInput.release(key);
-
-        active_keys &= ~(1u << key);
+        // XInput.release(key);
+        // NSGamepad.release(key);
+        if ((key & 0xff00) == 0) {
+            NSGamepad.release(static_cast<uint8_t>(key));
+            active_keys &= ~(1u << key);
+        } else {
+            dpad_bits ^= (key & ~0xff00);
+        }
 
         if (!print_keycodes) {
             show_controller();
         }
+        // print("unhit key %x\n", key);
     });
 
     if (print_keycodes) {

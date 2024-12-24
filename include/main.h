@@ -41,21 +41,21 @@ void on_press(int key);
 void bind_key(uint8_t keycode);
 
 class bind {
-    uint8_t key_ = 255;
+    uint16_t key_ = 0xffff;
 
 public:
     template<typename F>
     constexpr auto map(F&& f) {
-        if (key_ != 255) {
+        if (key_ != 0xffff) {
             f(key_);
         }
     }
 
     constexpr auto has_value() -> bool {
-        return key_ != 255;
+        return key_ != 0xffff;
     }
 
-    constexpr bind() : key_{255} {};
-    constexpr bind(uint8_t v) : key_{v} {};
+    constexpr bind() : key_{0xffff} {};
+    constexpr bind(uint16_t v) : key_{v} {};
 };
 
